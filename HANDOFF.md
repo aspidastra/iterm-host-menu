@@ -45,6 +45,7 @@ one sends the three commands above into the three panes.
 | `menu.py` | Python port of `menu.sh`. Imports `ensure_panes` from `setup_panes.py`. |
 | `menu_api.py` | Same menu as `menu.py`, but sends via iTerm2's Python API (persistent connection). Speed comparison; see 7a. |
 | `test_with_fakes.sh` | Runs all three menus end to end with fake `osascript`/`ssh`/`iterm2`. Doesn't touch iTerm2. |
+| `compare_timing.sh` | Sets up the `iterm2` venv if needed, times bare `osascript` vs. one iTerm2 Apple Event (5 runs each), then runs `menu.py` and `menu_api.py` with `MENU_TIMING=1`. See 7a. |
 
 The Bash and Python versions are meant to behave identically. **Both
 `setup_panes.*` files contain the same AppleScript** — if you change it in one,
@@ -198,9 +199,27 @@ menu and the commands appearing in the panes.
    - It sends `cmd + "\n"` because `async_send_text` doesn't add Return the way
      AppleScript `write text` does. **Unverified** on the user's shell.
 
-**Next:** the user runs `MENU_TIMING=1 python3 menu.py` and
-`MENU_TIMING=1 <venv>/bin/python menu_api.py` and compares the numbers. Decide
-which transport to keep from those numbers.
+**Results (user's Mac, 2026-10-01, one pick each):**
+
+| | send to 3 panes | total incl. `ssh -G` |
+|---|---|---|
+| `menu_api.py` (Python API) | **37 ms** | 185 ms |
+| `menu.py` (one batched osascript) | **4806 ms** | 5128 ms |
+
+- The Python API is far faster. It also confirms that API `session_id` matches
+  AppleScript `id`, since the API found the saved panes.
+- `ssh -G` takes about 150 to 320 ms, which is most of what's left in the API
+  total.
+- The osascript time of 4.8 s is much worse than the 0.5 s the user first
+  noticed. With only one sample, the cause is **unknown**. Possible causes
+  include a cold first call, a slow Apple Event round trip for each pane
+  lookup, or something else. If osascript is kept, time it several times
+  before drawing conclusions.
+  `compare_timing.sh` now also times a bare `osascript` and a single
+  iTerm2 Apple Event to help separate those causes (not yet run).
+
+**Next:** likely make the Python API the main transport (see section 8). That
+is not started; waiting for the user's decision.
 
 ## 8. Open ideas / possible next steps (not requested yet)
 

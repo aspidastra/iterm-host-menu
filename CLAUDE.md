@@ -19,6 +19,7 @@ python3 -m py_compile *.py
 ./setup_panes.sh     # or: python3 setup_panes.py   (create/reuse panes only)
 MENU_TIMING=1 python3 menu.py         # per-pick timings (menu.sh timing needs bash 5+)
 MENU_TIMING=1 ~/.venvs/iterm2/bin/python menu_api.py
+./compare_timing.sh                   # osascript baseline + both menus with timing (interactive, real iTerm2)
 ```
 
 `test_with_fakes.sh` is not an assertion suite. It puts a fake `osascript` and `ssh` on `PATH` and a fake `iterm2` module on `PYTHONPATH`, uses a throwaway `HOME` with a sample ssh config, and prints the commands each pane would receive plus the exit codes (expected values are printed next to them). You have to read the output to check it. It cannot test single cases; to check one scenario, copy its `run <mode> <cmd>` line. It never touches iTerm2, so real pane behaviour and real speed can only be checked by the user on their Mac.
