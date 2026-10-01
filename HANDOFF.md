@@ -121,7 +121,10 @@ constant (5) in each menu script.
 5. **Plain single-quoting of commands sent to panes** (`shq` in Bash,
    `shlex.quote` in Python). `printf %q` produced `$'...'` escapes for non-ASCII,
    which is ugly and not portable; the arrow `→` was replaced with `->`.
-6. **Wrong-tab check only at startup**, and it only triggers for panes that still
+6. **No `contents of <loop var>` inside `tell application "iTerm2"`.** iTerm2's
+   own `contents` property takes over the word (error -1728). Use numbered
+   loops (`repeat with k from 1 to count of L` / `item k of L`) there.
+7. **Wrong-tab check only at startup**, and it only triggers for panes that still
    exist; closed panes are simply recreated in the current tab.
 
 ## 6. Verification status
@@ -151,6 +154,11 @@ constant (5) in each menu script.
 - [ ] A full menu pick with real hosts: the echo, ping and nslookup land in
       the right panes, and `ssh -G` returns the expected addresses.
 - [ ] Recreating a single closed pane (close Option 2, rerun the menu).
+      **Failed on the Mac (2026-10-01)** with `Can’t get contents of 1. (-1728)`:
+      inside `tell application "iTerm2"`, `contents of i` was handled by
+      iTerm2 (sessions have a `contents` property), not by AppleScript.
+      Reproduced with a standalone script; fixed with a numbered loop in both
+      `setup_panes.*`. The fixed recreate path still needs a run on the Mac.
 
 ## 7. How to run
 

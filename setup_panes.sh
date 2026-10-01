@@ -109,8 +109,10 @@ on run argv
             end repeat
         else
             -- Some panes were closed: recreate just those, below the menu pane.
-            repeat with i in missingIdx
-                set n to contents of i
+            -- Numbered loop: inside this tell, "contents of i" goes to iTerm2
+            -- (sessions have a "contents" property) and fails with -1728.
+            repeat with k from 1 to (count of missingIdx)
+                set n to item k of missingIdx
                 tell homeSession to set s to (split horizontally with default profile)
                 tell s to set name to ("Option " & n)
                 set item n of outIds to (id of s)

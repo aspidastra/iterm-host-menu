@@ -39,6 +39,7 @@ Invariants to keep:
 - **The AppleScript is duplicated.** `setup_panes.sh` and `setup_panes.py` hold the same setup script, and `menu.sh` and `menu.py` hold the same `sendTo` script. Change one copy, change the other.
 - The commands typed into panes are defined in two places: `pane_commands()` in `menu.py` and the `send_to_panes` call in `menu.sh`.
 - In AppleScript, send commands such as `split` and `write text` only to numbered references (`session si of tab ti of window wi`) or to `current session of current window`. Never send them to `repeat with s in ...` loop variables, because iTerm2 rejected those (HANDOFF §5.1).
+- Inside `tell application "iTerm2"`, don't use `contents of <loop var>`: iTerm2's own `contents` property takes over the word (error -1728). Loop by index instead (HANDOFF §5.6).
 - A pane's identity is its session ID: the part of `ITERM_SESSION_ID` after the `:`, which equals AppleScript's `id of session`.
 - Quote text sent to panes with POSIX single quotes (`shq` in Bash, `shlex.quote` in Python), not `printf %q`. `shq` always adds quotes and `shlex.quote` only when needed, so the two outputs differ slightly (e.g. `ping -c 5 '10.0.0.5'` vs `ping -c 5 10.0.0.5`).
 - In Bash, split config values with `read -a`, not an unquoted `$var`, so that `Host *` isn't glob-expanded.
