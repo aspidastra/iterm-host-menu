@@ -42,10 +42,9 @@ one sends the three commands above into the three panes.
 | `setup_panes.sh` | Creates/reuses the 3 worker panes, saves their IDs. Exit 0 ok, 1 error, 2 wrong tab. |
 | `menu.sh` | Bash host menu. Calls `setup_panes.sh` first. |
 | `setup_panes.py` | Python port of `setup_panes.sh`. Importable: `ensure_panes()`. |
-| `menu.py` | Python port of `menu.sh`. Imports `ensure_panes` from `setup_panes.py`. |
-| `menu_api.py` | Same menu as `menu.py`, but sends via iTerm2's Python API (persistent connection). Speed comparison; see 7a. |
-| `test_with_fakes.sh` | Runs all three menus end to end with fake `osascript`/`ssh`/`iterm2`. Doesn't touch iTerm2. |
-| `compare_timing.sh` | Sets up the `iterm2` venv if needed, times bare `osascript` vs. one iTerm2 Apple Event (5 runs each), then runs `menu.py` and `menu_api.py` with `MENU_TIMING=1`. See 7a. |
+| `menu.py` | Python port of `menu.sh`, and the main entry. Sends via iTerm2's Python API by default, osascript as fallback (`MENU_TRANSPORT`, see 7a). Imports `ensure_panes` from `setup_panes.py`. |
+| `test_with_fakes.sh` | Runs `menu.sh` and both `menu.py` transports end to end with fake `osascript`/`ssh`/`iterm2`, plus the API fallback/error cases. Doesn't touch iTerm2. |
+| `compare_timing.sh` | Sets up the `iterm2` venv if needed, times bare `osascript` vs. one iTerm2 Apple Event (5 runs each), then runs `menu.py` with each `MENU_TRANSPORT` and `MENU_TIMING=1`. See 7a. |
 
 The Bash and Python versions are meant to behave identically. **Both
 `setup_panes.*` files contain the same AppleScript** — if you change it in one,
@@ -218,8 +217,28 @@ menu and the commands appearing in the panes.
   `compare_timing.sh` now also times a bare `osascript` and a single
   iTerm2 Apple Event to help separate those causes (not yet run).
 
-**Next:** likely make the Python API the main transport (see section 8). That
-is not started; waiting for the user's decision.
+**Decision (2026-10-01): the Python API is now `menu.py`'s main transport.**
+`menu_api.py` was folded into `menu.py` and deleted.
+- `MENU_TRANSPORT` unset: API if the `iterm2` package is importable, otherwise
+  osascript with a notice on stderr. `api`: API or exit 1. `osascript`: force
+  the old path.
+- The API connection lives on a background daemon thread for the whole
+  session (`ApiSender`); the menu's blocking `input()` stays on the main
+  thread. In `menu_api.py` it was the other way round (input in an executor
+  thread), where Ctrl-C at the prompt probably left the process waiting for
+  Enter before exiting. That was inferred, not observed.
+- If the API can't connect, the `iterm2` package prints its own help and calls
+  `sys.exit(1)`; `menu.py` catches that on the thread and exits 1, suggesting
+  `MENU_TRANSPORT=osascript`. It does not silently fall back, so a
+  misconfiguration doesn't quietly bring back the 4.8 s delay.
+- Pane creation is unchanged (`setup_panes.py`, osascript, once at startup).
+- `menu.sh` is unchanged and still uses osascript only.
+- `menu.py`'s shebang is `python3`, which normally has no `iterm2`; run it
+  with `~/.venvs/iterm2/bin/python` to get the API.
+
+**Still to confirm on the Mac:** the new `menu.py` with real iTerm2
+(`~/.venvs/iterm2/bin/python menu.py`): commands land in the right panes and
+actually run (i.e. the `"\n"` presses Return); Ctrl-C and Quit exit cleanly.
 
 ## 8. Open ideas / possible next steps (not requested yet)
 
@@ -228,8 +247,9 @@ is not started; waiting for the user's decision.
 - Re-check the tab on every menu pick (currently startup only).
 - When the wrong-tab case is detected, offer to switch to that tab automatically
   (AppleScript `select` on the tab/window) instead of just exiting.
-- If the API proves faster, move pane setup to the API too (`async_split_pane`,
-  `async_set_name`) and drop osascript from the Python path.
+- Move pane setup to the API too (`async_split_pane`, `async_set_name`) and
+  drop osascript from the Python path entirely (startup still pays for one
+  osascript run in `setup_panes.py`).
 - Consider keeping only one implementation to avoid the duplicated AppleScript.
 
 ## 9. Conversation history (condensed)
@@ -252,6 +272,8 @@ is not started; waiting for the user's decision.
 8. User saw a delay of about 0.5 s per pick. Sends were batched into one
    osascript call, `MENU_TIMING` was added, and `menu_api.py` (iTerm2 Python
    API) was written to compare speed (section 7a).
+9. Timings: API 37 ms vs. osascript 4.8 s per pick. `compare_timing.sh` added.
+   The API became `menu.py`'s main transport and `menu_api.py` was removed.
 
 User preference noted throughout: flag ambiguities and uncertainty explicitly,
 prioritise accuracy, don't fill gaps with guesses.

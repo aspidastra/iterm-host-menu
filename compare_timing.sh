@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# compare_timing.sh — compare per-pick send latency of menu.py (osascript)
-# and menu_api.py (iTerm2 Python API). Run it inside iTerm2, from the menu pane.
+# compare_timing.sh — compare per-pick send latency of menu.py's two transports:
+# osascript and the iTerm2 Python API. Run it inside iTerm2, from the menu pane.
 #
 # One-time manual step for the API version:
 #   iTerm2 → Settings → General → Magic → tick "Enable Python API"
@@ -32,7 +32,7 @@ for label, args in [
     print(f"  {label}: " + ", ".join(f"{x:.0f}" for x in times) + " ms")
 PY
 
-echo; echo "=== menu.py (osascript, batched) ==="
-MENU_TIMING=1 python3 menu.py
-echo; echo "=== menu_api.py (Python API) ==="
-MENU_TIMING=1 "$VENV/bin/python" menu_api.py
+echo; echo "=== menu.py, MENU_TRANSPORT=osascript ==="
+MENU_TIMING=1 MENU_TRANSPORT=osascript "$VENV/bin/python" menu.py
+echo; echo "=== menu.py, MENU_TRANSPORT=api ==="
+MENU_TIMING=1 MENU_TRANSPORT=api "$VENV/bin/python" menu.py
