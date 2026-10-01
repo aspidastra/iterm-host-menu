@@ -163,10 +163,8 @@ Historical (AppleScript era, kept for context; that code is gone):
 - [x] Wrong-tab detection with real panes in two tabs (exit 2).
 - [x] A full pick: commands land in the right panes and run.
 - [x] Quit and Ctrl-C exit cleanly.
-- [ ] Panes show the titles "Option 1..3". **Failed at first** (titles showed
-      `-zsh`; see decision 8). After the per-pane override, the API reads the
-      titles back as "Option n" on the live panes; the user still has to
-      confirm the title bars show them with the updated `setup_panes.py`.
+- [x] Panes show the titles "Option 1..3". Failed at first (titles showed
+      `-zsh`; see decision 8); confirmed working after the per-pane override.
 
 ## 7. How to run
 
