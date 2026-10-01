@@ -184,8 +184,17 @@ async def _ensure_panes(app, home_id: str, saved: list[str]) -> list[str]:
         new = {n: await home.async_split_pane(vertical=False) for n in missing}
 
     for n, session in new.items():
-        await session.async_set_name(f"Option {n}")
         ids[n - 1] = session.session_id
+
+    # Name every pane (reused ones too, so older panes get fixed), and make its
+    # title show that name. The user's Default profile shows only the job
+    # ("-zsh"), which hides the name; this override applies to these panes only.
+    show_name = iterm2.LocalWriteOnlyProfile()
+    show_name.set_title_components([iterm2.TitleComponents.SESSION_NAME])
+    for n, pane_id in enumerate(ids, 1):
+        session = app.get_session_by_id(pane_id, include_buried=False)
+        await session.async_set_name(f"Option {n}")
+        await session.async_set_profile_properties(show_name)
     return ids
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline tests for setup_panes.py and menu.py: python3 -m unittest -v
 
-A fake `iterm2` package (windows → tabs → panes, splits, names, sent text)
+A fake `iterm2` package (windows → tabs → panes, splits, names, titles, sent text)
 replaces the real one, so nothing touches iTerm2 and the real package isn't
 needed. Real iTerm2 behaviour (and real speed) is NOT covered by this.
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import enum
 import io
 import itertools
 import os
@@ -22,10 +23,32 @@ from unittest import mock
 
 
 # --- fake iterm2 package ------------------------------------------------------
+class TitleComponents(enum.Enum):
+    SESSION_NAME = 1 << 0
+    JOB = 1 << 1
+
+
+class LocalWriteOnlyProfile:
+    def __init__(self):
+        self.values = {}
+
+    def set_title_components(self, value):
+        self.values["title_components"] = list(value)
+
+
 class FakeSession:
     def __init__(self, app, session_id):
         self.app, self.session_id = app, session_id
         self.name = None
+        # Like the user's Default profile: the title shows only the job.
+        self.title_components = [TitleComponents.JOB]
+
+    @property
+    def title(self):
+        """What iTerm2 would show in the pane's title bar."""
+        if TitleComponents.SESSION_NAME in self.title_components and self.name:
+            return self.name
+        return "-zsh"
 
     async def async_split_pane(self, vertical=False, before=False, profile=None):
         new = self.app.new_session()
@@ -36,6 +59,9 @@ class FakeSession:
 
     async def async_set_name(self, name):
         self.name = name
+
+    async def async_set_profile_properties(self, write_only_profile):
+        self.title_components = write_only_profile.values.get("title_components", self.title_components)
 
     async def async_send_text(self, text, suppress_broadcast=False):
         self.app.sent.append((self.session_id, text))
@@ -89,8 +115,8 @@ class FakeApp:
         _, tab = self.get_window_and_tab_for_session(self.get_session_by_id(session_id))
         tab.sessions = [s for s in tab.sessions if s.session_id != session_id]
 
-    def names(self):
-        return {s.session_id: s.name for w in self.windows for t in w.tabs for s in t.sessions}
+    def titles(self):
+        return {s.session_id: s.title for w in self.windows for t in w.tabs for s in t.sessions}
 
 
 fake = types.ModuleType("iterm2")
@@ -108,6 +134,8 @@ def _run_until_complete(coro, retry=False):
     asyncio.run(coro(None))
 
 
+fake.TitleComponents = TitleComponents
+fake.LocalWriteOnlyProfile = LocalWriteOnlyProfile
 fake.async_get_app = _async_get_app
 fake.run_until_complete = _run_until_complete
 sys.modules["iterm2"] = fake
@@ -149,7 +177,7 @@ class SetupPanesTest(Base):
             (HOME_ID, False, s2),  # below the menu pane → Option 2
             (s1, False, s3),       # below Option 1 → Option 3
         ])
-        self.assertEqual([self.app.names()[i] for i in ids], ["Option 1", "Option 2", "Option 3"])
+        self.assertEqual([self.app.titles()[i] for i in ids], ["Option 1", "Option 2", "Option 3"])
         self.assertEqual(setup_panes.read_state(), ids)
 
     def test_second_run_reuses_panes(self):
@@ -165,7 +193,17 @@ class SetupPanesTest(Base):
         new1, new2, new3 = self.ensure()
         self.assertEqual((new1, new3), (s1, s3))
         self.assertEqual(self.app.splits, [(HOME_ID, False, new2)])
-        self.assertEqual(self.app.names()[new2], "Option 2")
+        self.assertEqual(self.app.titles()[new2], "Option 2")
+
+    def test_reused_panes_get_titles_too(self):
+        # Panes saved by an older version: named but showing only the job.
+        setup_panes.write_state(["A", "B", "C"])
+        self.app.add_tab(0, [])
+        self.app.windows[0].tabs[0].sessions += [FakeSession(self.app, i) for i in "ABC"]
+        self.assertEqual([self.app.titles()[i] for i in "ABC"], ["-zsh"] * 3)
+        self.assertEqual(self.ensure(), ["A", "B", "C"])
+        self.assertEqual(self.app.splits, [])
+        self.assertEqual([self.app.titles()[i] for i in "ABC"], ["Option 1", "Option 2", "Option 3"])
 
     def test_two_closed_panes_are_recreated(self):
         s1, s2, s3 = self.ensure()
@@ -174,7 +212,7 @@ class SetupPanesTest(Base):
         new = self.ensure()
         self.assertEqual(new[1], s2)
         self.assertNotIn(s1, new)
-        self.assertEqual([self.app.names()[i] for i in new], ["Option 1", "Option 2", "Option 3"])
+        self.assertEqual([self.app.titles()[i] for i in new], ["Option 1", "Option 2", "Option 3"])
 
     def test_panes_in_another_tab_raise_wrong_tab(self):
         setup_panes.write_state(["A", "B", "C"])

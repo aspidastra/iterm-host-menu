@@ -37,6 +37,7 @@ Things to keep:
 - A pane's identity is its session ID: the part of `ITERM_SESSION_ID` after the `:`.
 - Look panes up with `include_buried=False`; buried panes count as missing.
 - Quote text sent to panes with `shlex.quote`.
+- Pane titles need both `async_set_name` and a per-pane `title_components=[SESSION_NAME]` override (`async_set_profile_properties`): the user's Default profile shows only the job. Don't modify the user's profiles.
 
 ## Working with the user
 

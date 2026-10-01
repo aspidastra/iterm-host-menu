@@ -76,9 +76,14 @@ Other overrides: `SSH_CONFIG` (default `~/.ssh/config`), `MENU_TIMING=1`.
      `app.windows` / `window.tabs`), nothing split, exit **2**.
    - **All 3 missing →** 2×2 grid: split menu pane with a vertical divider →
      Option 1; split menu pane horizontally → Option 2; split Option 1
-     horizontally → Option 3. Each named "Option n" (`async_set_name`).
-   - **Some missing →** recreates only those, split below the menu pane.
-3. Writes the 3 IDs to the state file.
+     horizontally → Option 3.
+   - **Some missing →** recreates only those, split below the menu pane (the
+     user is fine with that; no need to restore grid positions).
+3. Names all 3 panes "Option n" (`async_set_name`) and overrides, for those
+   panes only, the profile's title components to `SESSION_NAME`
+   (`async_set_profile_properties`), so the title bar shows the name. Done on
+   every run, so reused panes get fixed too.
+4. Writes the 3 IDs to the state file.
 
 The menu pane no longer has to be focused: the API splits a pane by ID, while
 AppleScript could only split `current session of current window`.
@@ -115,6 +120,12 @@ AppleScript could only split `current session of current window`.
    `→` was replaced with `->` to keep them plain ASCII.
 7. **Wrong-tab check only at startup**, and only for panes that still exist;
    closed panes are simply recreated in the current tab.
+8. **Per-pane title override, not a profile change.** The user's Default
+   profile shows only the job in titles (`title_components=[JOB]`), so a set
+   name was invisible (panes showed `-zsh`). Diagnosed via the API on the Mac
+   (2026-10-01): `autoName` was "Option n" but `name` was "-zsh". Overriding
+   title components per session fixed it (read back as "Option n") without
+   touching the user's profile.
 
 Historical (AppleScript era, kept for context; that code is gone):
 - H1. iTerm2 rejected commands such as `split` sent to `repeat with s in ...`
@@ -128,8 +139,9 @@ Historical (AppleScript era, kept for context; that code is gone):
 ## 6. Verification status
 
 **Offline (`python3 -m unittest -v`, fake `iterm2`), all passing:**
-- Pane setup: 2×2 grid splits (parent, divider direction), names, state file;
-  reuse on second run; one and two closed panes recreated; wrong tab →
+- Pane setup: 2×2 grid splits (parent, divider direction), titles (the fake
+  shows "-zsh" until the title override is applied), state file; reuse on
+  second run; reused panes get titles; one and two closed panes recreated; wrong tab →
   `WrongTabError` with "tab 2 of window 2" and no splits; refusal outside
   iTerm2; missing package; connection failure; `setup_panes.main` exit codes.
 - Menu: host parsing on a sample config → `web1, web2, db, lab-box`;
@@ -145,16 +157,16 @@ Historical (AppleScript era, kept for context; that code is gone):
       AppleScript version had saved (2026-10-01).
 - [x] API send is fast: 37 ms for 3 panes (2026-10-01, old `menu_api.py`).
 
-**Still to confirm with the all-Python version:**
-- [ ] Fresh 2×2 grid comes out in the intended layout. The
-      `vertical=True` = side-by-side mapping comes from the package docstring
-      ("If True, the divider is vertical"), not from a run.
-- [ ] Panes show the titles "Option 1..3".
-- [ ] Recreating closed panes (close Option 2, rerun the menu).
-- [ ] Wrong-tab detection with real panes in two tabs (exit 2, sensible
-      "tab N of window M").
-- [ ] A full pick: commands land in the right panes **and run** (the `"\n"`).
-- [ ] Quit and Ctrl-C exit cleanly with the connection open.
+**Confirmed with the all-Python version (user, 2026-10-01):**
+- [x] Fresh 2×2 grid has the intended layout.
+- [x] Recreating a closed pane works (new pane appears below the menu pane).
+- [x] Wrong-tab detection with real panes in two tabs (exit 2).
+- [x] A full pick: commands land in the right panes and run.
+- [x] Quit and Ctrl-C exit cleanly.
+- [ ] Panes show the titles "Option 1..3". **Failed at first** (titles showed
+      `-zsh`; see decision 8). After the per-pane override, the API reads the
+      titles back as "Option n" on the live panes; the user still has to
+      confirm the title bars show them with the updated `setup_panes.py`.
 
 ## 7. How to run
 
@@ -201,6 +213,9 @@ then for everything.
     chose to go **100% Python**: pane setup moved to the API, Bash scripts,
     osascript and `test_with_fakes.sh`/`compare_timing.sh` removed, replaced by
     `test_menu.py`.
+11. On the Mac everything worked except pane titles (showed `-zsh`, because
+    the Default profile's title shows only the job). Fixed with a per-pane
+    title-components override (decision 8).
 
 User preference noted throughout: flag ambiguities and uncertainty explicitly,
 prioritise accuracy, don't fill gaps with guesses.
