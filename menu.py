@@ -5,9 +5,14 @@
   pane "Option 3" runs nslookup on it
 Panes are created on first run (via setup_panes.py) and targeted by saved ID.
 Set MENU_TIMING=1 to print how long each step takes.
+
+Everything goes through iTerm2's Python API over one connection kept open for
+the whole session (setup notes: top of setup_panes.py). Run it with the venv's
+Python, e.g. ~/.venvs/iterm2/bin/python menu.py.
 """
 from __future__ import annotations
 
+import asyncio
 import glob
 import os
 import re
@@ -18,60 +23,42 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from setup_panes import SetupError, WrongTabError, ensure_panes, run_osascript  # noqa: E402
+from setup_panes import ITermConnection, SetupError, WrongTabError, ensure_panes  # noqa: E402
 
 SSH_CONFIG = Path(os.environ.get("SSH_CONFIG", Path.home() / ".ssh" / "config"))
 PING_COUNT = 5
-
-SEND_SCRIPT = r'''
--- Type theCommand into the pane with id targetId. Returns "sent" or "not found".
-on sendTo(targetId, theCommand)
-    tell application "iTerm2"
-        repeat with wi from 1 to (count of windows)
-            repeat with ti from 1 to (count of tabs of window wi)
-                repeat with si from 1 to (count of sessions of tab ti of window wi)
-                    if (id of session si of tab ti of window wi) is targetId then
-                        tell session si of tab ti of window wi to write text theCommand
-                        return "sent"
-                    end if
-                end repeat
-            end repeat
-        end repeat
-    end tell
-    return "not found"
-end sendTo
-
--- argv is: id1 cmd1 id2 cmd2 ... ; prints one result line per pair.
-on run argv
-    set out to ""
-    repeat with k from 1 to (count of argv) by 2
-        set out to out & my sendTo(item k of argv, item (k + 1) of argv) & linefeed
-    end repeat
-    return out
-end run
-'''
 
 # "Keyword value" or "Keyword=value", as ssh_config allows.
 KEYWORD_RE = re.compile(r"^\s*([A-Za-z]+)\s*(?:=|\s)\s*(.*)$")
 
 
-def send_to_panes(pane_ids: list[str], commands: list[tuple[int, str]]) -> None:
-    """Type each (n, cmd) into pane "Option n".
-
-    All commands go out in ONE osascript call: starting osascript is the slow
-    part, so batching keeps the delay to a single launch instead of one per pane.
-    """
-    args = [x for n, cmd in commands for x in (pane_ids[n - 1], cmd)]
+def send_to_panes(conn: ITermConnection, pane_ids: list[str], commands: list[tuple[int, str]]) -> None:
+    """Type each (n, cmd) into pane "Option n", all at once."""
     try:
-        results = run_osascript(SEND_SCRIPT, *args).split()
-    except SetupError as e:
-        print(f"  ✗ {e}")
-        return
-    for (n, _), result in zip(commands, results):
-        if result == "sent":
-            print(f"  → sent to Option {n}")
-        else:
+        conn.run(_send(conn.app, pane_ids, commands), timeout=10)
+    except Exception as e:
+        print(f"  ✗ sending failed: {e!r}")
+
+
+async def _send(app, pane_ids: list[str], commands: list[tuple[int, str]]) -> None:
+    targets = []
+    for n, cmd in commands:
+        session = app.get_session_by_id(pane_ids[n - 1], include_buried=False)
+        if session is None:
             print(f"  ✗ pane for Option {n} is gone — restart the menu to recreate it")
+        else:
+            targets.append((n, session, cmd))
+
+    # "\n" = press Return (async_send_text types exactly the text it is given).
+    results = await asyncio.gather(
+        *(s.async_send_text(cmd + "\n", suppress_broadcast=True) for _, s, cmd in targets),
+        return_exceptions=True,
+    )
+    for (n, _, _), result in zip(targets, results):
+        if isinstance(result, Exception):
+            print(f"  ✗ Option {n}: {result}")
+        else:
+            print(f"  → sent to Option {n}")
 
 
 def timing(label: str, start: float) -> None:
@@ -81,7 +68,7 @@ def timing(label: str, start: float) -> None:
 
 
 def pane_commands(host: str, target: str) -> list[tuple[int, str]]:
-    """The commands each pane gets for a host (shared with menu_api.py)."""
+    """The commands each pane gets for a host."""
     return [
         (1, "echo " + shlex.quote(f"I want to ssh to {host}  ->  ssh {host}")),
         (2, f"ping -c {PING_COUNT} {shlex.quote(target)}"),
@@ -166,20 +153,37 @@ def choose(options: list[str]) -> str | None:
 
 
 def main() -> int:
+    t0 = time.perf_counter()
     try:
-        pane_ids = ensure_panes()
+        conn = ITermConnection()
+    except SetupError as e:
+        print(f"menu.py: {e}", file=sys.stderr)
+        return 1
+    timing("connect to iTerm2 (once)", t0)
+    try:
+        t1 = time.perf_counter()
+        pane_ids = ensure_panes(conn)
+        timing("pane setup", t1)
     except WrongTabError as e:
+        conn.close()
         print(e, file=sys.stderr)
         return 2
-    except SetupError as e:
-        print(f"setup_panes.py: {e}", file=sys.stderr)
+    except Exception as e:
+        conn.close()
+        print(f"menu.py: pane setup failed: {e}", file=sys.stderr)
         return 1
 
-    hosts = load_hosts()
-    if not hosts:
-        print(f"No hosts found in {SSH_CONFIG}")
-        return 1
+    try:
+        hosts = load_hosts()
+        if not hosts:
+            print(f"No hosts found in {SSH_CONFIG}")
+            return 1
+        return menu_loop(conn, pane_ids, hosts)
+    finally:
+        conn.close()
 
+
+def menu_loop(conn: ITermConnection, pane_ids: list[str], hosts: list[str]) -> int:
     while True:
         print(f"\n=== Hosts in {SSH_CONFIG} ===")
         opt = choose(hosts + ["Reload hosts", "Quit"])
@@ -196,8 +200,8 @@ def main() -> int:
         timing("ssh -G lookup", t0)
         print(f"Selected: {host} ({target})")
         t1 = time.perf_counter()
-        send_to_panes(pane_ids, pane_commands(host, target))
-        timing("send to 3 panes (one osascript)", t1)
+        send_to_panes(conn, pane_ids, pane_commands(host, target))
+        timing("send to 3 panes", t1)
         timing("total", t0)
 
 
